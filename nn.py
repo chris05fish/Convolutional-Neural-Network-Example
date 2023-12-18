@@ -4,6 +4,9 @@ import torch.nn.functional as F
 import torch.optim as optim
 import numpy as np 
 from tqdm import tqdm
+import time
+import matplotlib.pyplot as plt
+from matplotlib import style
 
 # Global variables
 
@@ -21,6 +24,13 @@ y = torch.Tensor([i[1] for i in training_data])
 
 VAL_PCT = 0.1
 val_size = int(len(X)*VAL_PCT)
+
+# test dataset using the last elements in data past val_size
+test_X = X[-val_size:]
+test_y = y[-val_size:]
+
+MODEL_NAME = f"model-{int(time.time())}"  # gives a dynamic model name, to just help with things getting messy over time
+print(MODEL_NAME)
 
 class Net(nn.Module):
     def __init__(self):
@@ -67,52 +77,118 @@ class Net(nn.Module):
         # activation layer
         return F.softmax(x, dim=1)
 
+net = Net()
+optimizer = optim.Adam(net.parameters(), lr=0.001)
+loss_function = nn.MSELoss()
+
 # training model is really slow     
 def train(net):
-    optimizer = optim.Adam(net.parameters(), lr=0.001)
-    loss_function = nn.MSELoss()
-
+    # training dataset using first elements in data up to val_size
     train_X = X[:-val_size]
     train_y = y[:-val_size]
     print(len(train_X))
 
-    for epoch in range(EPOCHS):
-        for i in tqdm(range(0, len(train_X), BATCH_SIZE)): 
-            # from 0 to the len of x, stepping batch size at a time [:50] 
-            #print(i, i+BATCH_SIZE)
-            batch_X = train_X[i:i+BATCH_SIZE].view(-1,1,50,50)
-            batch_y = train_y[i:i+BATCH_SIZE]
+    with open("model.log", "a") as f:
+        for epoch in range(EPOCHS):
+            for i in tqdm(range(0, len(train_X), BATCH_SIZE)): 
+                # from 0 to the len of x, stepping batch size at a time [:50] 
+                #print(i, i+BATCH_SIZE)
+                batch_X = train_X[i:i+BATCH_SIZE].view(-1,1,50,50)
+                batch_y = train_y[i:i+BATCH_SIZE]
 
-            #optimizer.zero_grad()
-            net.zero_grad()
+                # calc in sample accuracy and loss
+                acc, loss = fwd_pass(batch_X, batch_y, train=True)
 
-            outputs = net(batch_X)
-            loss = loss_function(outputs, batch_y)
-            loss.backward()
-            optimizer.step() # does the update
-
-        print(f"Epoch: {epoch}. Loss: {loss}")
+                #print(f"Acc: {round(float(acc),2)}  Loss: {round(float(loss),4)}")
+                #f.write(f"{MODEL_NAME},{round(time.time(),3)},in_sample,{round(float(acc),2)},{round(float(loss),4)}\n")
+                # just to show the above working, and then get out:
+                if i % 50 == 0:
+                    val_acc, val_loss = test(size=100)
+                    f.write(f"{MODEL_NAME},{round(time.time(),3)},{round(float(acc),2)},{round(float(loss), 4)},{round(float(val_acc),2)},{round(float(val_loss),4)}\n")
 
 # calc accuracy 
-def test(net):
-    correct = 0
-    total = 0
-    test_X = X[-val_size:]
-    test_y = y[-val_size:]
-    print(len(test_X))
+# def test(net):
+#     correct = 0
+#     total = 0
+#     #test_X = X[-val_size:]
+#     #test_y = y[-val_size:]
+#     print(len(test_X))
 
-    with torch.no_grad():
-        for i in tqdm(range(len(test_X))):
-            real_class = torch.argmax(test_y[i])
-            net_out = net(test_X[i].view(-1,1,50,50))[0] # returns a list
-            predicted_class = torch.argmax(net_out)
-            if predicted_class == real_class:
-                correct += 1
-            total += 1
+#     with torch.no_grad():
+#         for i in tqdm(range(len(test_X))):
+#             real_class = torch.argmax(test_y[i])
+#             net_out = net(test_X[i].view(-1,1,50,50))[0] # returns a list
+#             predicted_class = torch.argmax(net_out)
+#             if predicted_class == real_class:
+#                 correct += 1
+#             total += 1
 
-    print("Accuracy:", round(correct/total, 3))
+#     print("Accuracy:", round(correct/total, 3))
 
-net = Net()
+def fwd_pass(X, y, train=False):
+
+    if train:
+        net.zero_grad()
+    outputs = net(X)
+    matches  = [torch.argmax(i)==torch.argmax(j) for i, j in zip(outputs, y)]
+    acc = matches.count(True)/len(matches)
+    loss = loss_function(outputs, y)
+
+    if train:
+        loss.backward()
+        optimizer.step()
+
+    return acc, loss
+
+def test(size=32):
+    X, y = test_X[:size], test_y[:size]
+    # val_loss = out of sample lost
+    val_acc, val_loss = fwd_pass(X.view(-1, 1, 50, 50), y)
+    return val_acc, val_loss
 
 train(net)
-test(net)
+
+val_acc, val_loss = test(size=100)
+print(val_acc, val_loss)
+
+style.use("ggplot")
+
+model_name = MODEL_NAME # grab whichever model name you want here. We could also just reference the MODEL_NAME if you're in a notebook still.
+
+def create_acc_loss_graph(model_name):
+    contents = open("model.log", "r").read().split("\n")
+
+    times = []
+    accuracies = []
+    losses = []
+
+    val_accs = []
+    val_losses = []
+
+    for c in contents:
+        if model_name in c:
+            name, timestamp, acc, loss, val_acc, val_loss = c.split(",")
+
+            times.append(float(timestamp))
+            accuracies.append(float(acc))
+            losses.append(float(loss))
+
+            val_accs.append(float(val_acc))
+            val_losses.append(float(val_loss))
+
+
+    fig = plt.figure()
+
+    ax1 = plt.subplot2grid((2,1), (0,0))
+    ax2 = plt.subplot2grid((2,1), (1,0), sharex=ax1)
+
+
+    ax1.plot(times, accuracies, label="acc")
+    ax1.plot(times, val_accs, label="val_acc")
+    ax1.legend(loc=2)
+    ax2.plot(times,losses, label="loss")
+    ax2.plot(times,val_losses, label="val_loss")
+    ax2.legend(loc=2)
+    plt.show()
+
+create_acc_loss_graph(model_name)
