@@ -1,5 +1,5 @@
 # Convolutional-Neural-Network-Example
-A simple CNN that can decide whether a picture is of a cat or a dog.
+A simple CNN that can determine whether a given picture is of a cat or a dog.
 
 run data.py to build and save the data to training_data.npy.
 
